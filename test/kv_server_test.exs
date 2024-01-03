@@ -1,39 +1,46 @@
 defmodule KvServerTest do
   use ExUnit.Case
-  doctest KvServer
 
-  test "greets the world" do
-    assert KvServer.hello() == :world
+
+  setup do
+    Application.stop(:kv_server)
+    :ok = Application.start(:kv_server)
   end
 
-  @doc ~S"""
-  Parses the given `line` into a command.
+  setup do
+    opts = [:binary, packet: :line, active: false]
+    {:ok, socket} = :gen_tcp.connect('localhost', 4040, opts)
+    %{socket: socket}
+  end
 
-  ## Examples
+  test "server interaction", %{socket: socket} do
+    assert send_and_recv(socket, "UNKNOWN shopping\r\n") ==
+           "UNKNOWN COMMAND\r\n"
 
-      iex> KVServer.Command.parse "CREATE shopping\r\n"
-      {:ok, {:create, "shopping"}}
+    assert send_and_recv(socket, "GET shopping eggs\r\n") ==
+           "NOT FOUND\r\n"
 
-      iex> KVServer.Command.parse "CREATE  shopping  \r\n"
-      {:ok, {:create, "shopping"}}
+    assert send_and_recv(socket, "CREATE shopping\r\n") ==
+           "OK\r\n"
 
-      iex> KVServer.Command.parse "PUT shopping milk 1\r\n"
-      {:ok, {:put, "shopping", "milk", "1"}}
+    assert send_and_recv(socket, "PUT shopping eggs 3\r\n") ==
+           "OK\r\n"
 
-      iex> KVServer.Command.parse "GET shopping milk\r\n"
-      {:ok, {:get, "shopping", "milk"}}
+    # GET returns two lines
+    assert send_and_recv(socket, "GET shopping eggs\r\n") == "3\r\n"
+    assert send_and_recv(socket, "") == "OK\r\n"
 
-      iex> KVServer.Command.parse "DELETE shopping eggs\r\n"
-      {:ok, {:delete, "shopping", "eggs"}}
+    assert send_and_recv(socket, "DELETE shopping eggs\r\n") ==
+           "OK\r\n"
 
-  Unknown commands or commands with the wrong number of
-  arguments return an error:
+    # GET returns two lines
+    assert send_and_recv(socket, "GET shopping eggs\r\n") == "\r\n"
+    assert send_and_recv(socket, "") == "OK\r\n"
+  end
 
-      iex> KVServer.Command.parse "UNKNOWN shopping eggs\r\n"
-      {:error, :unknown_command}
-
-      iex> KVServer.Command.parse "GET shopping\r\n"
-      {:error, :unknown_command}
-
-  """
+  defp send_and_recv(socket, command) do
+    :ok = :gen_tcp.send(socket, command)
+    {:ok, data} = :gen_tcp.recv(socket, 0, 1000)
+    data
+  end
 end
